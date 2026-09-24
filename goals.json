@@ -1,0 +1,8 @@
+[
+  { "sport": "swim",     "period": "week",  "metric": "distance", "target": 7 },
+  { "sport": "hike",     "period": "week",  "metric": "distance", "target": 23 },
+  { "sport": "strength", "period": "week",  "metric": "count",    "target": 1 },
+
+  { "sport": "swim",     "period": "month", "metric": "distance", "target": 30 },
+  { "sport": "hike",     "period": "month", "metric": "distance", "target": 100 }
+]

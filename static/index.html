@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Workouts</title>
+<meta name="description" content="Personal training statistics from Strava">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Workouts">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1 class="brand">Workouts</h1>
+  <!-- View switcher, not a filter: training volume and race results answer
+       different questions and don't share a filter model. -->
+  <nav class="segmented views" id="views" aria-label="View" hidden></nav>
+  <div class="topbar-actions">
+    <span class="sync-state" id="sync-state" aria-live="polite"></span>
+    <!-- Icon-only, like the theme button: the label lives in aria-label and
+         title, so a screen reader and a hover both still name it. -->
+    <button type="button" id="sync-btn" class="btn btn-icon" aria-label="Sync now" title="Sync now">
+      <!-- Two arcs turning clockwise, each with a chevron head at its leading
+           end. Stroked rather than filled so it matches the other icons, and
+           the heads sit tangent to the arc so it reads as rotation. -->
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"
+           fill="none" stroke="currentColor" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.56 6.81A4.6 4.6 0 0 1 12.44 6.81"/>
+        <path d="M10.88 5.72 12.44 6.81 13.24 5.09"/>
+        <path d="M12.44 9.19A4.6 4.6 0 0 1 3.56 9.19"/>
+        <path d="M5.12 10.28 3.56 9.19 2.76 10.91"/>
+      </svg>
+    </button>
+    <button type="button" id="theme-btn" class="btn btn-icon" aria-label="Switch colour theme" title="Switch colour theme">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d="M8 1.5a6.5 6.5 0 1 0 0 13Z" fill="currentColor"/>
+        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- Above the views, not inside one: a session counted twice is wrong on every
+     tab, so this can't live in whichever tab you happen to be looking at. -->
+<div class="notice notice-warn" id="dupes-notice" hidden>
+  <strong id="dupes-title"></strong>
+  <ul class="dupes" id="dupes-list"></ul>
+  <span>Nothing has been deleted here. Remove the extra copy on Strava — that
+    fixes its own totals too — then run
+    <code>./venv/bin/python -m app.cli prune</code> on the Mac.</span>
+</div>
+
+<div class="view" id="view-goals" hidden>
+
+  <div class="notice notice-warn" id="goals-problems" hidden>
+    <strong>Some entries in <code>goals.json</code> couldn't be read.</strong>
+    <ul id="goals-problem-list"></ul>
+  </div>
+
+  <!-- Two blocks, week then month, each "where you are now" followed by "how
+       the last dozen went". A block is dropped entirely when goals.json has
+       nothing at that period, so the view only ever shows targets you set. -->
+  <section class="card" id="goals-week-card" hidden>
+    <div class="card-head">
+      <h2>This week</h2>
+      <p class="card-sub" id="goals-week-sub"></p>
+    </div>
+    <div class="goals" id="goals-week"></div>
+  </section>
+
+  <!-- Open, not folded: the history is half of what this view is for. -->
+  <section class="card" id="goals-week-history-card" hidden>
+    <div class="card-head">
+      <h2>Past weeks</h2>
+      <p class="card-sub" id="goals-week-history-sub"></p>
+    </div>
+    <div class="grid" id="goals-week-history"></div>
+  </section>
+
+  <section class="card" id="goals-month-card" hidden>
+    <div class="card-head">
+      <h2>This month</h2>
+      <p class="card-sub" id="goals-month-sub"></p>
+    </div>
+    <div class="goals" id="goals-month"></div>
+  </section>
+
+  <section class="card" id="goals-month-history-card" hidden>
+    <div class="card-head">
+      <h2>Past months</h2>
+      <p class="card-sub" id="goals-month-history-sub"></p>
+    </div>
+    <div class="grid" id="goals-month-history"></div>
+  </section>
+
+  <p class="card-sub" id="goals-empty" hidden>
+    No goals set. Add them to <code>goals.json</code> and reload.
+  </p>
+
+</div><!-- /view-goals -->
+
+<div class="view" id="view-training">
+
+  <div class="notice notice-warn" id="setup-notice" hidden>
+    <strong>Not connected to Strava yet.</strong>
+    <span>Run <code>./venv/bin/python -m app.cli authorize</code> on the Mac that hosts this app, then <code>sync --full</code>.</span>
+  </div>
+
+  <div class="notice notice-warn" id="empty-notice" hidden>
+    <strong>No activities stored yet.</strong>
+    <span>Run <code>./venv/bin/python -m app.cli sync --full</code> to pull your history.</span>
+  </div>
+
+  <!-- One filter row, above everything it scopes. -->
+  <!-- autocomplete=off: stop the browser restoring stale radio state on reload,
+       which would desync the controls from the saved filter state. -->
+  <form class="filters" id="filters" aria-label="Filters" autocomplete="off">
+    <fieldset class="filter">
+      <legend>Period</legend>
+      <div class="segmented" id="f-period" role="group"></div>
+    </fieldset>
+    <fieldset class="filter">
+      <legend>Grouped by</legend>
+      <div class="segmented" id="f-bucket" role="group"></div>
+    </fieldset>
+    <fieldset class="filter">
+      <legend>Measure</legend>
+      <div class="segmented" id="f-metric" role="group"></div>
+    </fieldset>
+    <fieldset class="filter filter-grow">
+      <legend>Sports</legend>
+      <div class="chips" id="f-sports" role="group"></div>
+    </fieldset>
+  </form>
+
+  <section class="tiles" id="tiles" aria-label="Totals for the selected period"></section>
+
+  <section class="card" id="records-card">
+    <div class="card-head">
+      <h2 id="records-title">Best ever</h2>
+      <p class="card-sub" id="records-sub"></p>
+    </div>
+    <div class="tiles" id="records" aria-label="Peak day, week, month and year"></div>
+  </section>
+
+  <!-- Folded by default: the typical week is a number you look up now and
+       then, not one you need in front of you every time. -->
+  <details class="card card-fold" id="averages-card">
+    <summary class="card-head fold-head">
+      <h2 id="averages-title">Typical amounts</h2>
+      <span class="card-sub" id="averages-sub"></span>
+    </summary>
+    <div class="tiles" id="averages" aria-label="Average day, week, month and year"></div>
+  </details>
+
+  <details class="card card-fold" id="chart1-card">
+    <summary class="card-head fold-head">
+      <h2 id="chart1-title">Over time</h2>
+      <span class="card-sub" id="chart1-sub"></span>
+    </summary>
+    <div class="legend" id="chart1-legend"></div>
+    <div class="chart" id="chart1" data-empty="No activity in this period."></div>
+  </details>
+
+  <details class="card card-fold" id="facets-card">
+    <summary class="card-head fold-head">
+      <h2>By sport</h2>
+      <span class="card-sub">Each sport on its own scale, so a quiet sport is still readable.</span>
+    </summary>
+    <div class="grid" id="chart2"></div>
+  </details>
+
+  <details class="card card-fold" id="chart3-card">
+    <summary class="card-head fold-head">
+      <h2>Year on year</h2>
+      <span class="card-sub" id="chart3-sub">Running total since 1 January — where this year sits against the ones before it. Whole calendar years, so this card follows the sport and measure filters but not the period.</span>
+    </summary>
+    <div class="legend legend-ordinal" id="chart3-legend"></div>
+    <div class="grid" id="chart3"></div>
+  </details>
+
+  <details class="card card-fold" id="totals-card">
+    <summary class="card-head fold-head">
+      <h2>Numbers</h2>
+      <span class="card-sub" id="table-sub"></span>
+    </summary>
+    <div class="table-wrap">
+      <table class="data-table" id="totals-table"></table>
+    </div>
+    <details class="details">
+      <summary>Show every period</summary>
+      <div class="table-wrap">
+        <table class="data-table" id="series-table"></table>
+      </div>
+    </details>
+  </details>
+
+</div><!-- /view-training -->
+
+<div class="view" id="view-week" hidden>
+
+  <!-- No period preset: the period is always one week. Which week, which
+       measure, and which sports are the three choices left. -->
+  <form class="filters" id="week-filters" aria-label="Week filters" autocomplete="off"
+        onsubmit="return false">
+    <fieldset class="filter">
+      <legend>Week</legend>
+      <div class="week-nav">
+        <button type="button" id="week-prev" class="btn btn-icon"
+                aria-label="Previous week" title="Previous week">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M10 3 5.5 8 10 13" fill="none" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <span class="week-nav-label" id="week-label" aria-live="polite">This week</span>
+        <button type="button" id="week-next" class="btn btn-icon"
+                aria-label="Next week" title="Next week">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M6 3 10.5 8 6 13" fill="none" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </fieldset>
+    <fieldset class="filter">
+      <legend>Measure</legend>
+      <div class="segmented" id="week-metric" role="group"></div>
+    </fieldset>
+    <!-- Only the sports that week actually contains — a chip for a sport you
+         didn't do is a control with nothing behind it. -->
+    <fieldset class="filter filter-grow" id="week-sports-filter" hidden>
+      <legend>Sports</legend>
+      <div class="chips" id="week-sports" role="group"></div>
+    </fieldset>
+  </form>
+
+  <section class="tiles" id="week-tiles" aria-label="Totals for this week"></section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2 id="week-title">Monday to Sunday</h2>
+      <p class="card-sub" id="week-sub"></p>
+    </div>
+    <div class="legend" id="week-legend"></div>
+    <div class="chart" id="week-chart" data-empty="Nothing logged this week yet."></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>By sport</h2>
+      <p class="card-sub" id="week-table-sub"></p>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="week-table"></table>
+    </div>
+    <p class="card-sub" id="week-table-empty" hidden>Nothing logged this week yet.</p>
+  </section>
+
+</div><!-- /view-week -->
+
+<div class="view" id="view-races" hidden>
+
+  <div class="notice notice-warn" id="races-problems" hidden>
+    <strong>Some rows in <code>pb.csv</code> couldn't be read.</strong>
+    <ul id="races-problem-list"></ul>
+  </div>
+
+  <section class="tiles" id="race-tiles" aria-label="Race totals"></section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Personal bests</h2>
+      <p class="card-sub">
+        Best time for every event you've raced. A 25 m pool is faster than a 50 m
+        pool for the same swim, so the two are listed separately and never
+        compared.
+      </p>
+    </div>
+    <div id="race-bests"></div>
+  </section>
+
+  <section class="card" id="race-progression-card">
+    <div class="card-head">
+      <h2>Progression</h2>
+      <p class="card-sub">
+        Events you've raced more than once. Lower is faster — the ringed mark is
+        your best.
+      </p>
+    </div>
+    <div class="grid" id="race-progression"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Every race</h2>
+      <p class="card-sub" id="race-log-sub"></p>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table" id="race-log"></table>
+    </div>
+  </section>
+
+</div><!-- /view-races -->
+
+<div class="view" id="view-workouts" hidden>
+
+  <!-- Its own filter row: this view answers "find me that one session", which
+       needs a search box and shares nothing with the volume filters. -->
+  <form class="filters" id="log-filters" aria-label="Workout filters" autocomplete="off"
+        onsubmit="return false">
+    <fieldset class="filter filter-grow">
+      <legend><label for="log-q">Search</label></legend>
+      <div class="search">
+        <input type="search" id="log-q" class="search-input" placeholder="sport or date, e.g. swim or 2025-09"
+               autocapitalize="none" autocorrect="off" spellcheck="false">
+      </div>
+    </fieldset>
+    <fieldset class="filter">
+      <legend>Period</legend>
+      <div class="segmented" id="log-period" role="group"></div>
+    </fieldset>
+    <fieldset class="filter filter-grow">
+      <legend>Sports</legend>
+      <div class="chips" id="log-sports" role="group"></div>
+    </fieldset>
+  </form>
+
+  <section class="tiles" id="log-tiles" aria-label="Totals for the matching workouts"></section>
+
+  <!-- Above the list and shut by default: the month grid answers "what did
+       that month look like", which is a question you ask now and then. The
+       list underneath is what the view is for. -->
+  <details class="card card-fold" id="calendar-card">
+    <summary class="card-head fold-head">
+      <h2>Calendar</h2>
+      <span class="card-sub">Every session on its day, a month at a time. Takes the search and
+        sport chips above; the period is its own.</span>
+    </summary>
+    <div class="cal-top">
+      <div class="week-nav">
+        <button type="button" id="cal-prev" class="btn btn-icon"
+                aria-label="Previous month" title="Previous month">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M10 3 5.5 8 10 13" fill="none" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <span class="week-nav-label" id="cal-label" aria-live="polite"></span>
+        <button type="button" id="cal-next" class="btn btn-icon"
+                aria-label="Next month" title="Next month">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M6 3 10.5 8 6 13" fill="none" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <p class="card-sub cal-totals" id="cal-totals"></p>
+    </div>
+    <div class="calendar" id="calendar"></div>
+  </details>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>All workouts</h2>
+      <p class="card-sub" id="log-sub"></p>
+    </div>
+    <div class="table-wrap">
+      <table class="data-table data-table-log" id="log-table"></table>
+    </div>
+    <p class="card-sub" id="log-empty" hidden>Nothing matches that search.</p>
+    <div class="log-more">
+      <button type="button" id="log-more" class="btn" hidden>Show more</button>
+    </div>
+  </section>
+
+</div><!-- /view-workouts -->
+
+  <footer class="foot">
+    <span id="foot-range"></span>
+  </footer>
+</main>
+
+<div class="tooltip" id="tooltip" role="status" aria-live="polite" hidden></div>
+
+<script src="/charts.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,851 @@
+/* ==========================================================================
+   Design tokens.
+
+   The four sport hues were validated as a set (all pairs, both modes) for
+   colour-vision deficiency, lightness band, chroma and contrast. Do not add a
+   fifth chromatic sport without re-running the validation — no five-hue set
+   clears the all-pairs gate. Strength is therefore achromatic (graphite on
+   light, silver on dark): it separates on lightness alone, so it cannot
+   collide with any hue under any deficiency. It is kept distinct from
+   --text-muted on purpose; sharing that value is what made it read as chrome
+   rather than data. "Other" is the genuine unclassified tail and stays muted.
+   Year lines use an ordinal single-hue blue ramp, because years are ordered
+   and hue would misstate that.
+
+   --accent is the one colour that is NOT data: slot 7 (violet) of the same
+   categorical palette, the slot no sport occupies. It dresses interactive
+   chrome — focus rings, the active segmented control, the callout rule — so a
+   control can never be read as a series. Focus rings used to wear --sport-swim,
+   which put a data hue around the Swim chart. Never point --accent at a
+   --sport-* value, and never colour a chart mark with it.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  --page:            #faf9f2;
+  --surface-1:       #fcfcf9;
+  --text-primary:    #0b0b0b;
+  --text-secondary:  #52514e;
+  --text-muted:      #898781;
+  --grid:            #e1e0d9;
+  --axis:            #c3c2b7;
+  --border:          rgba(11, 11, 11, 0.10);
+  --hover-wash:      rgba(11, 11, 11, 0.05);
+  --good:            #006300;
+  --bad:             #d03b3b;
+
+  /* Goal targets on the history charts. The one place a rule wears a hue: it
+     is a line you are asked to compare bars against, not a series, so it is
+     kept out of --sport-* and drawn with a casing (see charts.js) rather than
+     relying on the hue alone to separate it from the green it crosses. */
+  --target-rule:     #d03b3b;
+
+  /* Hairline between the segments of a stacked progress bar. Black in both
+     themes: it only ever sits between two filled segments, so it reads as a
+     division rather than as a colour of its own. */
+  --meter-divider:   #0b0b0b;
+
+  /* Interactive chrome only — focus rings, the active control, callout rules.
+     Slot 7 of the categorical palette, the one no sport uses, so a control can
+     never be mistaken for a series. Data colour stays in --sport-*. */
+  --accent:          #4a3aa7;
+
+  --sport-run:      #e87ba4;
+  --sport-ride:     #eda100;
+  --sport-swim:     #2a78d6;
+  --sport-hike:     #008300;
+  --sport-strength: #3d3b36;
+  --sport-other:    #898781;
+
+  /* Ordinal ramp, oldest → newest. Lightest step stays above 2:1 on light. */
+  --year-1: #86b6ef;
+  --year-2: #6da7ec;
+  --year-3: #5598e7;
+  --year-4: #2a78d6;
+  --year-5: #1c5cab;
+  --year-6: #104281;
+
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+
+    --page:           #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --axis:           #383835;
+    --border:         rgba(255, 255, 255, 0.10);
+    --hover-wash:     rgba(255, 255, 255, 0.07);
+    --good:           #0ca30c;
+    --bad:            #e66767;
+    --target-rule:    #e66767;
+    --meter-divider:  #0d0d0d;
+
+    --accent:         #9085e9;
+
+    --sport-run:      #d55181;
+    --sport-ride:     #c98500;
+    --sport-swim:     #3987e5;
+    --sport-hike:     #008300;
+    --sport-strength: #b8b6ae;
+    --sport-other:    #898781;
+
+    --year-1: #184f95;
+    --year-2: #1c5cab;
+    --year-3: #256abf;
+    --year-4: #3987e5;
+    --year-5: #6da7ec;
+    --year-6: #9ec5f4;
+
+    --shadow: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --page:           #0d0d0d;
+  --surface-1:      #1a1a19;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --grid:           #2c2c2a;
+  --axis:           #383835;
+  --border:         rgba(255, 255, 255, 0.10);
+  --hover-wash:     rgba(255, 255, 255, 0.07);
+  --good:           #0ca30c;
+  --bad:            #e66767;
+  --target-rule:    #e66767;
+  --meter-divider:  #0d0d0d;
+
+  --accent:         #9085e9;
+
+  --sport-run:      #d55181;
+  --sport-ride:     #c98500;
+  --sport-swim:     #3987e5;
+  --sport-hike:     #008300;
+  --sport-strength: #b8b6ae;
+  --sport-other:    #898781;
+
+  --year-1: #184f95;
+  --year-2: #1c5cab;
+  --year-3: #256abf;
+  --year-4: #3987e5;
+  --year-5: #6da7ec;
+  --year-6: #9ec5f4;
+
+  --shadow: none;
+}
+
+/* ========================================================================== */
+
+* { box-sizing: border-box; }
+
+/* Our layout rules use display:flex/grid, which would otherwise win over the
+   user-agent's [hidden] rule. */
+[hidden] { display: none !important; }
+
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--hover-wash);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+/* --- top bar ------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+  padding: 12px 20px;
+  padding-top: calc(12px + env(safe-area-inset-top));
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand { font-size: 17px; }
+
+/* The view switcher rides in the top bar, and drops to its own full-width row
+   when the bar gets tight rather than squeezing the title. */
+.views { margin-left: 4px; }
+.views label { padding: 6px 14px; }
+
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+
+.sync-state {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.btn:hover { background: var(--hover-wash); }
+.btn:active { transform: translateY(0.5px); }
+.btn[disabled] { opacity: 0.5; cursor: default; }
+.btn-icon { padding: 6px; width: 32px; display: grid; place-items: center; color: var(--text-secondary); }
+/* An icon-only button has no word to change, and 50% opacity is a weak way to
+   say "working" — so the arrows turn while the sync runs. */
+.btn-icon.is-busy svg { animation: spin 900ms linear infinite; transform-origin: 50% 50%; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Out of sight, still announced. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- layout -------------------------------------------------------------- */
+
+main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.notice {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  padding: 12px 16px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.notice span { color: var(--text-secondary); }
+
+/* One line per copy, indented under the session they belong to. */
+.dupes { margin: 2px 0 0; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
+.dupes > li { margin-bottom: 6px; }
+.dupes > li:last-child { margin-bottom: 0; }
+.dupes .dupe-head { color: var(--text-primary); font-weight: 500; }
+.dupes ul { list-style: none; margin: 2px 0 0; padding: 0; }
+.dupes ul li { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.dupes .amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dupes a { color: var(--accent); }
+.dupes a:hover { text-decoration: none; }
+
+/* --- filter row ---------------------------------------------------------- */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 18px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.filter { border: 0; padding: 0; margin: 0; min-width: 0; }
+.filter-grow { flex: 1 1 220px; }
+
+.filter legend {
+  padding: 0 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.segmented {
+  display: inline-flex;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 2px;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.segmented label {
+  position: relative;
+  font-size: 13px;
+  line-height: 1;
+  padding: 7px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+}
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented label:hover { background: var(--hover-wash); }
+.segmented label:has(input:checked) {
+  background: var(--accent);
+  color: var(--page);
+  font-weight: 500;
+}
+.segmented label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The view switcher is icon-only: the label text is still in the DOM for
+   screen readers, so each segment gets a square tap target instead of one
+   sized by its (invisible) word. */
+.views label {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 32px;
+  padding: 0;
+}
+.views svg { display: block; }
+
+/* Back / forward a week. The label is fixed-width so the arrows don't shuffle
+   sideways as "This week" becomes "27 Jul – 2 Aug". */
+.week-nav { display: flex; align-items: center; gap: 6px; }
+.week-nav-label {
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 12ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 7px 12px 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.chip input { position: absolute; opacity: 0; pointer-events: none; }
+.chip:hover { background: var(--hover-wash); }
+.chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chip .swatch {
+  width: 10px; height: 10px; border-radius: 3px;
+  background: var(--chip-color, var(--text-muted));
+  opacity: 0.3;
+  flex: none;
+}
+.chip:has(input:checked) { color: var(--text-primary); border-color: color-mix(in srgb, var(--chip-color) 45%, var(--border)); }
+.chip:has(input:checked) .swatch { opacity: 1; }
+
+/* --- stat tiles ---------------------------------------------------------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tile-label { font-size: 12px; color: var(--text-secondary); }
+.tile-value { font-size: 30px; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; }
+.tile-value .unit { font-size: 15px; font-weight: 500; color: var(--text-secondary); margin-left: 2px; }
+.tile-delta { font-size: 12px; color: var(--text-muted); display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 5px; }
+/* Keep the arrow glued to its percentage when the tile is narrow. */
+.tile-delta .dir { font-weight: 600; white-space: nowrap; }
+.tile-delta.up .dir { color: var(--good); }
+.tile-delta.down .dir { color: var(--bad); }
+
+/* When a peak happened, rather than how it compares. */
+.tile-when { font-size: 12px; color: var(--text-muted); display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.tile-when .when { font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+
+/* --- goals --------------------------------------------------------------- */
+
+.goals { display: flex; flex-direction: column; gap: 16px; }
+
+.goal { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.goal-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+}
+.goal-name { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+/* `.key` carries only its colour inline — every place that uses one sizes it
+   itself, so a swatch without a rule here is an invisible 0x0 span. */
+.goal-name .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.goal-figure { font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.goal-figure strong {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+/* The bar is the sport's colour; everything structural around it is
+   achromatic, so the only hue in the row is the data. */
+/* No overflow clip: the pace mark stands slightly proud of the bar, which is
+   what makes it read as a reference rather than a stripe of data. */
+.meter {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--grid);
+}
+.meter-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 4px;
+  min-width: 2px;
+  /* Segments live inside, so the clip is what keeps the rounded ends. */
+  display: flex;
+  overflow: hidden;
+}
+/* One per contributing sport, sized by its share of the total. Divided by a
+   hairline so two colours never touch — it costs nothing where the pair is
+   obvious and earns its keep where it isn't. Drawn as an inset shadow rather
+   than a border: `box-sizing: border-box` plus `flex-basis: 0` would take a
+   border out of the segment's own share and skew the proportion it reports. */
+.meter-seg { min-width: 0; flex-basis: 0; }
+.meter-seg + .meter-seg { box-shadow: inset 1px 0 0 var(--meter-divider); }
+/* Where an evenly-spread period would have you by now. A hairline rather than
+   a second fill: it is a reference, not a quantity. */
+.meter-pace {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1.6px;
+  background: var(--text-secondary);
+  border-radius: 1px;
+}
+/* Past the target the bar is full and the overshoot has nowhere to go, so the
+   surplus is said in words underneath instead of drawn. */
+.meter[data-state="hit"] { background: color-mix(in srgb, var(--good) 18%, var(--grid)); }
+
+.goal-note { font-size: 12px; color: var(--text-muted); }
+.goal-note .flag { font-weight: 600; white-space: nowrap; }
+.goal-note.good .flag { color: var(--good); }
+.goal-note.bad .flag { color: var(--bad); }
+
+.facet-total .of { color: var(--text-muted); font-weight: 400; }
+
+/* --- cards --------------------------------------------------------------- */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.card-head { display: flex; flex-direction: column; gap: 2px; }
+.card-head h2 { font-size: 15px; }
+.card-sub { margin: 0; font-size: 13px; color: var(--text-secondary); display: block; }
+
+/* --- foldable cards ------------------------------------------------------ */
+
+/* A folded card keeps its head as the handle, so the page reads the same
+   whether it is open or shut. */
+.card-fold > summary {
+  cursor: pointer;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 2px 12px;
+  border-radius: 6px;
+}
+.card-fold > summary::-webkit-details-marker { display: none; }
+.card-fold > summary h2 { grid-column: 1; }
+.card-fold > summary .card-sub { grid-column: 1; }
+.card-fold > summary::after {
+  content: "";
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 8px;
+  height: 8px;
+  margin: 5px 2px 0 0;
+  border-right: 1.6px solid var(--text-muted);
+  border-bottom: 1.6px solid var(--text-muted);
+  transform: rotate(45deg);
+  transition: transform 120ms ease;
+}
+.card-fold[open] > summary::after { transform: rotate(-135deg); margin-top: 8px; }
+.card-fold > summary:hover::after { border-color: var(--text-primary); }
+/* Shut, the card is just its head — no leftover flex gap under it. */
+.card-fold:not([open]) { gap: 0; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.facet { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.facet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.facet-title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+.facet-title .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.facet-total { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+
+/* --- legend -------------------------------------------------------------- */
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.legend-item .key { width: 12px; height: 10px; border-radius: 3px; flex: none; }
+.legend-item .key-line { width: 14px; height: 2px; border-radius: 2px; flex: none; }
+
+.legend-ordinal { gap: 4px 10px; }
+.legend-ordinal .legend-item { gap: 5px; }
+
+/* --- charts -------------------------------------------------------------- */
+
+.chart {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  /* A chart is read by pressing it, not by selecting it. Without these, iOS
+     Safari treats a press on a bar as the start of a text selection: it
+     highlights the whole chart and can raise the copy/share callout. Inherited,
+     so the svg and its labels are covered too. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.chart svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+.chart[data-state="empty"]::after {
+  content: attr(data-empty);
+  display: block;
+  padding: 32px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.is-loading .card, .is-loading .tiles { opacity: 0.55; transition: opacity 120ms ease; }
+
+/* --- tooltip ------------------------------------------------------------- */
+
+.tooltip {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  min-width: 140px;
+  max-width: 260px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 22px rgba(11, 11, 11, 0.14);
+  padding: 9px 11px;
+  font-size: 12px;
+}
+.tooltip[hidden] { display: none; }
+.tt-head {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+.tt-row { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
+.tt-row .key-line { width: 12px; height: 2px; border-radius: 2px; flex: none; }
+.tt-row .tt-value {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.tt-row .tt-name { color: var(--text-secondary); }
+.tt-total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 5px; }
+
+/* --- tables -------------------------------------------------------------- */
+
+.table-wrap { overflow-x: auto; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.data-table th, .data-table td {
+  text-align: right;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--grid);
+  white-space: nowrap;
+}
+.data-table th:first-child, .data-table td:first-child { text-align: left; }
+.data-table thead th {
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tfoot td { font-weight: 600; border-top: 1px solid var(--axis); border-bottom: 0; }
+.data-table .name { display: flex; align-items: center; gap: 8px; }
+.data-table .name .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+/* --- races --------------------------------------------------------------- */
+
+.view { display: flex; flex-direction: column; gap: 20px; }
+
+.course-block + .course-block { margin-top: 22px; }
+
+.course-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+.course-head h3 { font-size: 13px; font-weight: 600; }
+.course-head .count { font-size: 12px; color: var(--text-muted); }
+
+.notice ul { margin: 4px 0 0; padding-left: 20px; color: var(--text-secondary); }
+.notice li { font-size: 13px; }
+
+/* A best time is the answer the table exists for, so it carries the weight. */
+.data-table .best-time { font-weight: 600; }
+.data-table .pb-flag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--good);
+  border: 1px solid color-mix(in srgb, var(--good) 40%, transparent);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.data-table .gain { color: var(--good); }
+.data-table .muted { color: var(--text-muted); }
+
+/* --- workout log --------------------------------------------------------- */
+
+.search { display: flex; }
+.search-input {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  min-height: 32px;
+  min-width: 0;
+  width: 100%;
+  max-width: 320px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.search-input::placeholder { color: var(--text-muted); }
+
+/* Sortable headers are buttons, so they answer to the keyboard too. */
+.data-table th .sort {
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.data-table th .sort:hover { color: var(--text-primary); }
+.data-table th[aria-sort] .sort { color: var(--text-primary); font-weight: 600; }
+.data-table th .arrow { font-size: 9px; }
+
+.data-table-log tbody tr:hover { background: var(--hover-wash); }
+/* The sport name reads as a label, not a figure, so it sits with the date. */
+.data-table-log th:nth-child(2), .data-table-log td:nth-child(2) { text-align: left; }
+.data-table-log .log-name { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
+/* The label is the link to Strava. Colour stays inherited so it can't compete
+   with the sport key beside it; a muted underline is what says "link", and it
+   has to be there at rest — a hover-only affordance is invisible on a phone,
+   which is where this list is mostly read. */
+.data-table-log a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--text-muted);
+  text-underline-offset: 2px;
+}
+.data-table-log a:hover { text-decoration-color: currentColor; }
+.data-table-log .sport { display: inline-flex; align-items: center; gap: 7px; }
+.data-table-log .sport .key { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+.log-more { display: flex; justify-content: center; }
+
+/* --- calendar ------------------------------------------------------------ */
+
+/* Month stepper on the left, that month's totals on the right; they wrap onto
+   two lines before either one is squeezed. */
+.cal-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+}
+.cal-totals { font-variant-numeric: tabular-nums; }
+
+.calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+
+.cal-head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-align: center;
+  padding-bottom: 2px;
+}
+
+.cal-day {
+  min-height: 74px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 5px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+/* The days either side belong to another month — no box, nothing to read. */
+.cal-blank { border-color: transparent; }
+.cal-day.is-today { border-color: var(--axis); }
+.cal-num { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.cal-day.is-today .cal-num { color: var(--text-primary); font-weight: 600; }
+
+/* One row per session, tinted with its sport so a month reads as a pattern
+   before you read a single figure. */
+.cal-entry {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  background: color-mix(in srgb, var(--entry-color) 12%, transparent);
+}
+.cal-entry:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--entry-color) 24%, transparent);
+}
+.cal-entry .key { width: 6px; height: 6px; border-radius: 2px; background: var(--entry-color); flex: none; }
+.cal-entry-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.details { font-size: 13px; }
+.details summary { cursor: pointer; color: var(--text-secondary); padding: 6px 0; }
+.details summary:hover { color: var(--text-primary); }
+
+.foot {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 4px 0 12px;
+}
+
+@media (max-width: 640px) {
+  main { padding: 14px; gap: 14px; }
+  .topbar { padding-left: 14px; padding-right: 14px; }
+  .card { padding: 14px; }
+  .tile-value { font-size: 26px; }
+  .grid { grid-template-columns: 1fr; }
+  .search-input { max-width: none; }      /* full width is easier to tap */
+  /* An icon is a smaller target than the word it replaced — give the segments
+     back some room on the screen where they're tapped rather than clicked. */
+  .views label { width: 44px; height: 38px; }
+  /* Seven columns leave no room for a figure — the tinted dots carry which
+     sports happened, and the day itself is a tap away on Strava. */
+  .calendar { gap: 3px; }
+  .cal-day { min-height: 52px; padding: 3px; }
+  .cal-entry { padding: 3px 2px; justify-content: center; }
+  .cal-entry-text { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+  /* The disabled state and the "syncing…" text still say it is working. */
+  .btn-icon.is-busy svg { animation: none; }
+}
