@@ -18,6 +18,11 @@
   const BAR_MAX = 24;
   const BAR_RADIUS = 4;
   const GAP = 2;
+  // A sport with nothing to measure in the chart's unit — strength training on
+  // a distance chart — still happened. It gets a sliver this tall instead of
+  // vanishing. Fixed in pixels on purpose: it is a presence mark, not a value,
+  // and it must never be mistaken for one or move the scale.
+  const STUB_H = 3;
 
   function svg(tag, attrs) {
     const node = document.createElementNS(NS, tag);
@@ -69,6 +74,13 @@
   /* --- marks ------------------------------------------------------------- */
 
   // A column: rounded at the data-end, square where it meets the baseline.
+  // Opt-in: a series may carry a `stubs` array alongside `values`, counting
+  // what happened in a bucket the chart's unit cannot express. Series without
+  // one behave exactly as before.
+  function stubAt(series, i) {
+    return (series.stubs && series.stubs[i]) || 0;
+  }
+
   function columnPath(x, y, w, h, radius) {
     const r = Math.max(0, Math.min(radius, w / 2, h));
     if (r < 1) return `M${x},${y}h${w}v${h}h${-w}z`;
@@ -98,7 +110,8 @@
       if (!this.node) this.node = document.getElementById('tooltip');
       return this.node;
     },
-    // rows: [{label, value, color, kind}] — labels are data, so textContent only.
+    // rows: [{label, value, color, total, muted}] — labels are data, so
+    // textContent only.
     show(head, rows, anchor) {
       const el = this.el();
       if (!el) return;
@@ -111,7 +124,7 @@
 
       for (const row of rows) {
         const line = document.createElement('div');
-        line.className = 'tt-row' + (row.total ? ' tt-total' : '');
+        line.className = 'tt-row' + (row.total ? ' tt-total' : '') + (row.muted ? ' tt-muted' : '');
         if (row.color) {
           const key = document.createElement('span');
           key.className = 'key-line';
@@ -268,22 +281,38 @@
     const bars = svg('g', {});
     spec.buckets.forEach((_, i) => {
       const x = m.left + i * band + (band - barW) / 2;
-      let cum = 0;
-      let topIndex = -1;
-      spec.series.forEach((s, si) => { if ((s.values[i] || 0) > 0) topIndex = si; });
+      const measured = spec.series.filter((s) => (s.values[i] || 0) > 0);
+      // Slivers ride on top of the measured stack rather than in series order,
+      // so the part of the column drawn to scale is never broken by a mark
+      // that has no scale.
+      const present = spec.series.filter(
+        (s) => !((s.values[i] || 0) > 0) && stubAt(s, i) > 0
+      );
 
-      spec.series.forEach((s, si) => {
-        const value = s.values[i] || 0;
-        if (value <= 0) return;
+      let cum = 0;
+      let top = m.top + plotH;              // pixel top of the column so far
+      measured.forEach((s, si) => {
+        const value = s.values[i];
         const yBottom = yScale(cum) - (cum > 0 ? GAP : 0);
         const yTop = yScale(cum + value);
         cum += value;
         const h = yBottom - yTop;
         if (h <= 0.4) return;
+        const capped = si === measured.length - 1 && !present.length;
         bars.appendChild(svg('path', {
-          d: columnPath(x, yTop, barW, h, si === topIndex ? BAR_RADIUS : 0),
+          d: columnPath(x, yTop, barW, h, capped ? BAR_RADIUS : 0),
           fill: s.color,
         }));
+        top = yTop;
+      });
+
+      present.forEach((s, si) => {
+        const yTop = top - (top < m.top + plotH ? GAP : 0) - STUB_H;
+        bars.appendChild(svg('path', {
+          d: columnPath(x, yTop, barW, STUB_H, si === present.length - 1 ? BAR_RADIUS : 0),
+          fill: s.color,
+        }));
+        top = yTop;
       });
     });
     root.appendChild(bars);
@@ -341,8 +370,23 @@
         x: m.left + i * band, y: m.top, width: band, height: plotH, fill: t.wash,
       }));
       const rows = spec.series
-        .map((s) => ({ label: s.label, value: spec.formatValue(s.values[i] || 0), color: s.color, raw: s.values[i] || 0 }))
-        .filter((r) => r.raw > 0)
+        .map((s) => {
+          const value = s.values[i] || 0;
+          if (value > 0) {
+            return { label: s.label, value: spec.formatValue(value), color: s.color };
+          }
+          // A sliver says something happened; the tooltip is where it says
+          // what, since the chart's own unit has no answer for it.
+          const stub = stubAt(s, i);
+          if (!stub) return null;
+          return {
+            label: s.label,
+            value: spec.formatStub ? spec.formatStub(stub) : '—',
+            color: s.color,
+            muted: true,
+          };
+        })
+        .filter(Boolean)
         .reverse();
       if (spec.series.length > 1) {
         rows.push({ label: 'Total', value: spec.formatValue(stackTotals[i]), total: true });

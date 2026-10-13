@@ -51,6 +51,11 @@
      never be mistaken for a series. Data colour stays in --sport-*. */
   --accent:          #4a3aa7;
 
+  /* Every trace on the map, whatever the sport: the map answers "where have I
+     been", not "doing what". Strava's orange, which stands clear of the grey
+     basemap and of the blue of rivers and lakes. */
+  --track:           #fc4c02;
+
   --sport-run:      #e87ba4;
   --sport-ride:     #eda100;
   --sport-swim:     #2a78d6;
@@ -68,6 +73,18 @@
 
   --radius: 10px;
   --shadow: 0 1px 2px rgba(11, 11, 11, 0.04);
+
+  /* How far below the safe-area inset the top bar's content starts in the
+     installed iOS app, to clear iOS 27's blur band. Validated on an iPhone. */
+  --ios-blur-gap: 32px;
+
+  /* The top bar's padding-top, in one place, so the body can reserve exactly
+     the same amount in pure CSS. The safe-area inset is resolved by iOS, not
+     by us, and can change after load (resume, rotation) — if the page's
+     offset depended on JS noticing that, the top of every screen would slide
+     under the bar. JS only measures the rest of the bar (--topbar-rest-h). */
+  --topbar-pad-top: calc(12px + env(safe-area-inset-top));
+  --topbar-offset: calc(var(--topbar-pad-top) + var(--topbar-rest-h, 51px));
 }
 
 @media (prefers-color-scheme: dark) {
@@ -89,6 +106,7 @@
     --meter-divider:  #0d0d0d;
 
     --accent:         #9085e9;
+    --track:          #ff6a2a;
 
     --sport-run:      #d55181;
     --sport-ride:     #c98500;
@@ -126,6 +144,7 @@
   --meter-divider:  #0d0d0d;
 
   --accent:         #9085e9;
+  --track:          #ff6a2a;
 
   --sport-run:      #d55181;
   --sport-ride:     #c98500;
@@ -160,7 +179,13 @@ body {
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
   padding-bottom: env(safe-area-inset-bottom);
+  /* The top bar is fixed, so the page starts below it. app.js keeps
+     the bar height in step; see --topbar-offset in :root. */
+  padding-top: var(--topbar-offset);
 }
+
+/* Anchors and focus scrolling land below the fixed bar, not under it. */
+html { scroll-padding-top: var(--topbar-offset); }
 
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 
@@ -175,8 +200,12 @@ code {
 /* --- top bar ------------------------------------------------------------- */
 
 .topbar {
-  position: sticky;
+  /* Fixed, not sticky: iOS 27 only keeps a fixed bar clear of the blur it
+     lays over the top of an installed app. */
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
   z-index: 20;
   display: flex;
   flex-wrap: wrap;
@@ -184,10 +213,27 @@ code {
   justify-content: space-between;
   gap: 10px 12px;
   padding: 12px 20px;
-  padding-top: calc(12px + env(safe-area-inset-top));
+  padding-top: var(--topbar-pad-top);
   background: color-mix(in srgb, var(--page) 88%, transparent);
   backdrop-filter: saturate(1.4) blur(12px);
   border-bottom: 1px solid var(--border);
+}
+
+/* Words under the icons only exist in the phone tab bar. */
+.tab-label { display: none; }
+
+/* Installed on iOS only (-webkit-touch-callout is WebKit-on-iOS): push the
+   bar's content below the blur band and make it opaque so nothing scrolls
+   visibly behind it. Desktop and plain Safari never match this. */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    :root { --topbar-pad-top: calc(12px + env(safe-area-inset-top) + var(--ios-blur-gap)); }
+    .topbar {
+      background: var(--page);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
 }
 
 .brand { font-size: 17px; }
@@ -356,6 +402,10 @@ main {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+/* A year is always four digits, so the width that stops "This week" from
+   shuffling the arrows is only dead space here — and dead space next to the
+   period chips is what pushes the filter row to wrap on a phone. */
+.week-nav-label-short { min-width: 4ch; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 
@@ -628,6 +678,9 @@ main {
 }
 .tt-row .tt-name { color: var(--text-secondary); }
 .tt-total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 5px; }
+/* A presence sliver has no value in the chart's unit; its row says so quietly
+   rather than sitting at the same weight as a measured one. */
+.tt-muted .tt-value { font-weight: 500; color: var(--text-muted); }
 
 /* --- tables -------------------------------------------------------------- */
 
@@ -826,22 +879,151 @@ main {
   padding: 4px 0 12px;
 }
 
+/* --- map ----------------------------------------------------------------- */
+
+/* Tall enough to read a neighbourhood, short enough that the page header and
+   the filter row stay on screen above it. */
+.map {
+  height: min(72vh, 760px);
+  min-height: 340px;
+  border-radius: calc(var(--radius) - 4px);
+  overflow: hidden;
+  background: var(--grid);
+  /* Leaflet's panes sit at z-index 400+; keep them under the tooltip and the
+     sticky topbar rather than letting them float over the whole page. */
+  position: relative;
+  z-index: 0;
+}
+
+/* OpenStreetMap's tiles are drawn in full colour, and their orange main roads
+   would read as traces. Mostly drained, so the traces are the only loud thing;
+   a little colour is kept so water and woods are still told apart. The dark
+   theme inverts them — OSM publishes no dark style — and turns the hues back
+   round so water stays blue-ish. Only the tile pane: the traces live in the
+   overlay pane and keep their colour. */
+.map .leaflet-tile-pane { filter: grayscale(0.85) contrast(0.92) brightness(1.04); }
+:root[data-theme="dark"] .map .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) grayscale(0.85) brightness(0.85) contrast(0.9);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .map .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) grayscale(0.85) brightness(0.85) contrast(0.9);
+  }
+}
+
+.map-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.map-head .btn { flex: none; }
+
+/* Leaflet's chrome in the app's own colours, so the dark theme doesn't get a
+   white popup and white zoom buttons. */
+.map .leaflet-popup-content-wrapper,
+.map .leaflet-popup-tip {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.map .leaflet-popup-content { margin: 10px 14px; font: inherit; font-size: 13px; line-height: 1.45; }
+.map .leaflet-popup-content strong { display: block; font-size: 14px; }
+.map .leaflet-popup-content .muted { color: var(--text-secondary); }
+.map .leaflet-popup-content a { color: var(--accent); }
+.map .leaflet-container a.leaflet-popup-close-button { color: var(--text-muted); }
+.map .leaflet-bar a {
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-bottom-color: var(--border);
+}
+.map .leaflet-bar a:hover { background: var(--page); }
+.map .leaflet-control-attribution {
+  background: color-mix(in srgb, var(--surface-1) 80%, transparent);
+  color: var(--text-muted);
+}
+.map .leaflet-control-attribution a { color: var(--text-secondary); }
+
 @media (max-width: 640px) {
-  main { padding: 14px; gap: 14px; }
-  .topbar { padding-left: 14px; padding-right: 14px; }
+  main { padding-top: 14px; gap: 14px; }
   .card { padding: 14px; }
   .tile-value { font-size: 26px; }
   .grid { grid-template-columns: 1fr; }
   .search-input { max-width: none; }      /* full width is easier to tap */
-  /* An icon is a smaller target than the word it replaced — give the segments
-     back some room on the screen where they're tapped rather than clicked. */
-  .views label { width: 44px; height: 38px; }
   /* Seven columns leave no room for a figure — the tinted dots carry which
      sports happened, and the day itself is a tap away on Strava. */
   .calendar { gap: 3px; }
   .cal-day { min-height: 52px; padding: 3px; }
   .cal-entry { padding: 3px 2px; justify-content: center; }
   .cal-entry-text { display: none; }
+}
+
+/* --- phone: iOS tab bar ------------------------------------------------- */
+
+@media (max-width: 699px) {
+  /* Full-bleed under viewport-fit=cover: keep content off the notch sides. */
+  main, .topbar {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+  /* Without the switcher in it the bar is shorter; fallback measured at 500px. */
+  :root { --topbar-offset: calc(var(--topbar-pad-top) + var(--topbar-rest-h, 45px)); }
+  /* Room for the tab bar, so the end of the page can scroll clear of it. */
+  main { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
+
+  /* The top bar's backdrop-filter would make it the containing block for the
+     fixed tab bar inside it, pinning the bar inside the header — so on a
+     phone the header is opaque instead. */
+  .topbar { backdrop-filter: none; -webkit-backdrop-filter: none; background: var(--page); }
+
+  /* The view switcher becomes a UITabBar pinned to the bottom, where a thumb
+     reaches it. */
+  .views {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 30;
+    display: flex;
+    flex-wrap: nowrap;
+    margin: 0;
+    padding: 6px max(0px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(0px, env(safe-area-inset-left));
+    gap: 0;
+    border: 0;
+    border-top: 0.5px solid var(--border);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--page) 82%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+  }
+  /* Tabs share the width evenly, so the bar stays balanced whether the
+     optional Goals/Races views are there (6 tabs) or not (4). */
+  .views label {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 0 0 2px;
+    border-radius: 0;
+    color: var(--text-muted);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .views label:hover { background: none; }
+  /* iOS marks the current tab by tinting it, not with a filled pill. */
+  .views label:has(input:checked) { background: none; color: var(--accent); font-weight: 400; }
+  .views label:has(input:focus-visible) { outline-offset: -2px; }
+  .views svg { width: 26px; height: 26px; }
+  /* The icons are drawn on a 16-unit grid; at 26px this is ~1.7px of line,
+     and a touch heavier on the active tab. */
+  .views svg [stroke] { stroke-width: 1.05; }
+  .views label:has(input:checked) svg [stroke] { stroke-width: 1.4; }
+  .tab-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

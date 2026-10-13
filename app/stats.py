@@ -681,6 +681,43 @@ def activities(
     }
 
 
+def tracks(groups: list[str] | None = None) -> dict:
+    """Every GPS trace on file, for the map of everywhere you've been.
+
+    Strava's `map.summary_polyline` comes back with every activity in the list
+    sync already stores, so this costs no API call at all. It is a simplified
+    line — a few metres off at street level, which is plenty to see which
+    streets you've walked — and is sent still encoded: decoding it is the
+    browser's job, and the encoded form is a fraction of the size.
+
+    Indoor and manual sessions have an empty polyline and are left out.
+    """
+    clause, params = _group_filter(groups)
+    with db.cursor() as conn:
+        rows = conn.execute(
+            "SELECT id, local_date, sport_type, sport_group, distance, "
+            "       json_extract(raw, '$.map.summary_polyline') AS line "
+            "FROM activities "
+            "WHERE COALESCE(json_extract(raw, '$.map.summary_polyline'), '') != ''"
+            f"{clause} ORDER BY start_date_local",
+            params,
+        ).fetchall()
+    return {
+        "count": len(rows),
+        "tracks": [
+            {
+                "id": r["id"],
+                "date": r["local_date"],
+                "label": log_label(r["sport_group"], r["sport_type"]),
+                "group": r["sport_group"],
+                "distance": round((r["distance"] or 0.0) / 1000.0, 2),
+                "line": r["line"],
+            }
+            for r in rows
+        ],
+    }
+
+
 def cumulative(metric: str, group: str, years: int = 6) -> dict:
     """Running total by day-of-year, one line per calendar year.
 

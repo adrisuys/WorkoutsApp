@@ -7,16 +7,47 @@
 
   const $ = (id) => document.getElementById(id);
 
+  /* --- top bar height ---------------------------------------------------- */
+
+  // The top bar is position: fixed (iOS 27 only keeps a fixed bar clear of its
+  // blur band in the installed app), so it no longer reserves its own space.
+  // --topbar-h is its full height; --topbar-rest-h is everything below its
+  // padding-top. The CSS offsets the page by --topbar-pad-top + rest, so the
+  // part iOS controls (safe-area inset) never waits on JS — only the part
+  // that changes when the bar wraps does, and a content-box observer sees that.
+  (function trackTopbarHeight() {
+    const bar = document.querySelector('.topbar');
+    if (!bar) return;
+    const root = document.documentElement.style;
+    const publish = () => {
+      const padTop = parseFloat(getComputedStyle(bar).paddingTop) || 0;
+      root.setProperty('--topbar-h', bar.offsetHeight + 'px');
+      root.setProperty('--topbar-rest-h', (bar.offsetHeight - padTop) + 'px');
+    };
+    publish();
+    if ('ResizeObserver' in window) new ResizeObserver(publish).observe(bar);
+    // Belt and braces: keep --topbar-h current across rotation and resume.
+    for (const type of ['resize', 'orientationchange', 'pageshow', 'load']) {
+      window.addEventListener(type, publish);
+    }
+    document.addEventListener('visibilitychange', publish);
+  })();
+
   /* --- periods ----------------------------------------------------------- */
 
+  // Two questions, not six: "how did this year go" and "how has it all gone".
+  // Which year is a separate control — a stepper, the same one the week and
+  // the calendar use — so the first question can be asked of any year rather
+  // than only the one we happen to be in.
   const PERIODS = [
-    { key: '12w', label: '12 weeks', bucket: 'week', days: 12 * 7 },
-    { key: '6m',  label: '6 months', bucket: 'week', months: 6 },
-    { key: '12m', label: '12 months', bucket: 'month', months: 12 },
-    { key: 'ytd', label: 'This year', bucket: 'month', ytd: true },
-    { key: '3y',  label: '3 years', bucket: 'month', years: 3 },
+    { key: 'year', label: 'Year', bucket: 'month', year: true },
     { key: 'all', label: 'All time', bucket: 'year', all: true },
   ];
+
+  // What a filter saved by an older build turns into. The rest have no honest
+  // equivalent here, so they fall through to the default rather than being
+  // bent into one.
+  const PERIOD_ALIASES = { ytd: 'year' };
 
   const BUCKETS = [
     { key: 'week', label: 'Week' },
@@ -117,8 +148,12 @@
     // when there is no goals.json the switcher falls through to the first view
     // that does exist — This week, which is the same question one grain wider.
     view: 'goals',
-    period: '12m',
+    period: 'year',
     bucket: 'month',
+    // Which year the Year period means. Not remembered between sessions, for
+    // the same reason the week offset isn't: you open the app on the year you
+    // are in, not the one you were reading about last time.
+    year: new Date().getFullYear(),
     metric: 'distance',
     sports: null,        // Set of group keys, derived on load from `excluded`
     // What you've *unticked*, remembered rather than what you've left on — the
@@ -149,9 +184,11 @@
     },
     // The workout log keeps its own filters: it answers "find that session",
     // not "how much did I do", so nothing is shared with the volume filters.
+    // The log answers "find that session", and a search that can only see part
+    // of the history is a worse search — so it has no period of its own: it is
+    // always all time.
     log: {
       q: '',
-      period: 'all',
       sports: null,
       excluded: new Set(),
       sort: 'date',
@@ -163,6 +200,15 @@
     // same reason the week isn't: you open the app on the month you're in.
     calendar: {
       month: null,       // 'YYYY-MM-01' of the month on screen, null until first drawn
+    },
+    // The map of every trace: always all time, so only which sports and where
+    // you were looking are kept. Unticked sports are remembered, as elsewhere.
+    map: {
+      sports: null,
+      excluded: new Set(),
+      viewport: null,    // { lat, lng, zoom } — reopening lands where you left it
+      data: null,
+      loaded: false,
     },
     folds: {},           // card id -> open, once you've had an opinion about it
   };
@@ -181,10 +227,13 @@
         // The search text is deliberately not kept: reopening the app to a
         // filtered list you don't remember typing is a puzzle, not a feature.
         log: {
-          period: state.log.period,
           sort: state.log.sort,
           direction: state.log.direction,
           excluded: [...state.log.excluded],
+        },
+        map: {
+          excluded: [...state.map.excluded],
+          viewport: state.map.viewport,
         },
         folds: state.folds,
       }));
@@ -197,7 +246,8 @@
       if (!raw) return;
       const saved = JSON.parse(raw);
       if (VIEWS.some((v) => v.key === saved.view)) state.view = saved.view;
-      if (PERIODS.some((p) => p.key === saved.period)) state.period = saved.period;
+      const period = PERIOD_ALIASES[saved.period] || saved.period;
+      if (PERIODS.some((p) => p.key === period)) state.period = period;
       if (BUCKETS.some((b) => b.key === saved.bucket)) state.bucket = saved.bucket;
       if (METRICS.some((m) => m.key === saved.metric)) state.metric = saved.metric;
       if (Array.isArray(saved.excluded)) state.excluded = new Set(saved.excluded);
@@ -206,7 +256,6 @@
       if (METRICS.some((m) => m.key === week.metric)) state.week.metric = week.metric;
 
       const log = saved.log || {};
-      if (PERIODS.some((p) => p.key === log.period)) state.log.period = log.period;
       // Only the sortable columns count: matching against every column would
       // let a missing key match the ones that have no sort of their own.
       if (LOG_SORT_KEYS.includes(log.sort)) state.log.sort = log.sort;
@@ -218,26 +267,38 @@
       }
       if (log.direction === 'asc' || log.direction === 'desc') state.log.direction = log.direction;
       if (Array.isArray(log.excluded)) state.log.excluded = new Set(log.excluded);
+
+      const savedMap = saved.map || {};
+      if (Array.isArray(savedMap.excluded)) state.map.excluded = new Set(savedMap.excluded);
+      const vp = savedMap.viewport;
+      if (vp && [vp.lat, vp.lng, vp.zoom].every(Number.isFinite)) state.map.viewport = vp;
     } catch (_) { /* ignore */ }
   }
 
-  function range(periodKey) {
-    const preset = PERIODS.find((p) => p.key === periodKey) || PERIODS[2];
-    const end = new Date();
-    let start = new Date(end);
+  // The first year there is anything to show, and the last — the bounds the
+  // stepper stops at. Before the overview lands they collapse to this year,
+  // which is the only year we can be sure exists.
+  const thisYear = () => new Date().getFullYear();
+
+  function firstYear() {
+    const first = state.overview && state.overview.first_date;
+    return first ? parseDay(first).getFullYear() : thisYear();
+  }
+
+  function range(periodKey, year = state.year) {
+    const preset = PERIODS.find((p) => p.key === periodKey) || PERIODS[0];
+    const today = new Date();
+    let start = new Date(today);
+    let end = today;
     if (preset.all) {
       start = state.overview && state.overview.first_date
-        ? parseDay(state.overview.first_date) : new Date(end.getFullYear() - 5, 0, 1);
-    } else if (preset.ytd) {
-      start = new Date(end.getFullYear(), 0, 1);
-    } else if (preset.days) {
-      start.setDate(start.getDate() - preset.days + 1);
-    } else if (preset.months) {
-      start.setMonth(start.getMonth() - preset.months);
-      start.setDate(start.getDate() + 1);
-    } else if (preset.years) {
-      start.setFullYear(start.getFullYear() - preset.years);
-      start.setDate(start.getDate() + 1);
+        ? parseDay(state.overview.first_date) : new Date(today.getFullYear() - 5, 0, 1);
+    } else if (preset.year) {
+      start = new Date(year, 0, 1);
+      // A year that is over ends on its last day; the one we are in ends
+      // today, so the part-period notes stay honest and the comparison is
+      // against the same stretch of last year rather than all of it.
+      if (year < today.getFullYear()) end = new Date(year, 11, 31);
     }
     return { start: iso(start), end: iso(end) };
   }
@@ -264,6 +325,16 @@
   }
 
   function buildSegmented(container, items, name, current, onChange) {
+    // A control whose markup isn't there is a shell that has come apart — an
+    // old script against new HTML, which the service worker works hard to
+    // prevent but a reload mid-deploy can still produce. Losing one control is
+    // a far smaller failure than throwing here, which would take the rest of
+    // boot with it: the view switcher and the first data load come after this,
+    // so the page would be left with no tabs and empty cards.
+    if (!container) {
+      console.error(`buildSegmented: no container for "${name}" — stale shell?`);
+      return;
+    }
     container.textContent = '';
     for (const item of items) {
       const label = document.createElement('label');
@@ -283,6 +354,13 @@
         text.className = 'visually-hidden';
         text.textContent = item.label;
         label.appendChild(text);
+        // Shown only in the phone tab bar, under the icon. Hidden from screen
+        // readers, which already have the full word above.
+        const caption = document.createElement('span');
+        caption.className = 'tab-label';
+        caption.setAttribute('aria-hidden', 'true');
+        caption.textContent = item.short || item.label;
+        label.appendChild(caption);
       } else {
         label.appendChild(document.createTextNode(item.label));
       }
@@ -331,15 +409,42 @@
     }
   }
 
+  // The stepper is only a control while Year is the period, and it only steps
+  // as far as there is anything to show: back to the first year on file,
+  // forward to the one we are in.
+  function renderYearNav() {
+    const on = state.period === 'year';
+    $('f-year-filter').hidden = !on;
+    if (!on) return;
+    $('year-label').textContent = String(state.year);
+    $('year-prev').disabled = state.year <= firstYear();
+    $('year-next').disabled = state.year >= thisYear();
+  }
+
+  function stepYear(delta) {
+    const year = Math.min(thisYear(), Math.max(firstYear(), state.year + delta));
+    if (year === state.year) return;
+    state.year = year;
+    renderYearNav();
+    refresh();
+  }
+
   function buildControls() {
     buildSegmented($('f-period'), PERIODS, 'period', state.period, (key) => {
       state.period = key;
       const preset = PERIODS.find((p) => p.key === key);
       state.bucket = preset.bucket;           // presets carry a sensible grain
+      // Coming back to Year lands on the year you are in, not the one you
+      // stepped away from: the same rule the week stepper follows.
+      if (preset.year) state.year = thisYear();
       buildSegmented($('f-bucket'), BUCKETS, 'bucket', state.bucket, onBucket);
+      renderYearNav();
       saveState();
       refresh();
     });
+    $('year-prev').addEventListener('click', () => stepYear(-1));
+    $('year-next').addEventListener('click', () => stepYear(1));
+    renderYearNav();
     buildSegmented($('f-bucket'), BUCKETS, 'bucket', state.bucket, onBucket);
     buildSegmented($('f-metric'), METRICS, 'metric', state.metric, (key) => {
       state.metric = key;
@@ -1526,22 +1631,35 @@
     const legend = $('week-legend');
 
     const series = view.series
-      .map((s) => ({
-        key: s.key,
-        label: s.label,
-        values: s[state.week.metric],
-        color: sportColor(s.key),
-      }))
-      .filter((s) => s.values.some((v) => v > 0))
+      .map((s) => {
+        const values = s[state.week.metric];
+        return {
+          key: s.key,
+          label: s.label,
+          values,
+          // Strength training has no distance and no climb, so on those two
+          // measures it used to drop off the chart entirely and a strength-only
+          // day read as a rest day. The sessions it did have mark the day with
+          // a sliver instead — true for any sport with a blank in this unit,
+          // which is what the table already says with an em dash.
+          stubs: values.map((v, i) => (v > 0 ? 0 : s.count[i])),
+          color: sportColor(s.key),
+        };
+      })
+      .filter((s) => s.values.some((v) => v > 0) || s.stubs.some((v) => v > 0))
       // Stacking draws series bottom-up in array order; hiking is the slowest,
       // heaviest-looking bar, so it reads best anchored at the base every time
       // rather than shuffling with whatever order the API happens to return.
       .sort((a, b) => (a.key === 'hike' ? -1 : b.key === 'hike' ? 1 : 0));
 
     const running = data.offset === 0;
+    const slivers = series.some((s) => s.stubs.some((v) => v > 0));
     $('week-sub').textContent =
       `${spanText(data.start, data.end)}${running ? ` — day ${data.elapsed_days} of 7` : ''}. `
       + `${metricLabel} per day, stacked by sport.`
+      + (slivers
+        ? ` A sliver is a session with no ${metricLabel.toLowerCase()} to it.`
+        : '')
       + (running && data.elapsed_days < 7
         ? ' The flat days at the end are the ones that haven\'t happened yet.'
         : '');
@@ -1572,6 +1690,7 @@
       }),
       formatValue: fmt.value,
       formatTick: fmt.tick,
+      formatStub: (n) => `${num(n, 0)} session${n === 1 ? '' : 's'}`,
       integerTicks: state.week.metric === 'count',
       labelWidth: 34,                       // 'Mon' needs far less room than a date
       emphasisIndex: data.days.indexOf(data.today),
@@ -1878,7 +1997,7 @@
     // by the same things that redraw the list — but not by paging it.
     if (!append && calOpen()) refreshCalendar();
 
-    const { start, end } = range(state.log.period);
+    const { start, end } = range('all');
     // Offline with a cold overview: no chip state yet, so don't filter by sport.
     const sports = state.log.sports ? [...state.log.sports].join(',') : '';
     const offset = append ? state.log.shown : 0;
@@ -1904,12 +2023,6 @@
   }
 
   function buildLogControls() {
-    buildSegmented($('log-period'), PERIODS, 'log-period', state.log.period, (key) => {
-      state.log.period = key;
-      saveState();
-      refreshLog();
-    });
-
     const search = $('log-q');
     let timer = null;
     search.value = state.log.q;
@@ -2105,6 +2218,231 @@
     $('cal-next').addEventListener('click', () => calStep(1));
   }
 
+  /* --- map --------------------------------------------------------------- */
+
+  // Leaflet is 150 KB the other views never touch, so it is fetched the first
+  // time the map is opened rather than on every launch. A failure to load it
+  // costs the map, never the rest of the app.
+  let leafletLoading = null;
+
+  function loadLeaflet() {
+    if (window.L) return Promise.resolve();
+    if (!leafletLoading) {
+      leafletLoading = new Promise((resolve, reject) => {
+        const css = document.createElement('link');
+        css.rel = 'stylesheet';
+        css.href = '/vendor/leaflet/leaflet.css';
+        // Ahead of styles.css, so the app's overrides of Leaflet's chrome win.
+        document.head.insertBefore(css, document.head.querySelector('link[rel="stylesheet"]'));
+        const script = document.createElement('script');
+        script.src = '/vendor/leaflet/leaflet.js';
+        script.onload = () => resolve();
+        script.onerror = () => {
+          leafletLoading = null;            // let the next open try again
+          reject(new Error('could not load the map library'));
+        };
+        document.head.appendChild(script);
+      });
+    }
+    return leafletLoading;
+  }
+
+  // Google's encoded polyline format, precision 5 — what Strava's
+  // summary_polyline is. Decoded once per trace and kept on it.
+  function decodePolyline(encoded) {
+    const points = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+    const next = () => {
+      let result = 0;
+      let shift = 0;
+      let byte;
+      do {
+        byte = encoded.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < encoded.length);
+      return (result & 1) ? ~(result >> 1) : (result >> 1);
+    };
+    while (index < encoded.length) {
+      lat += next();
+      lng += next();
+      points.push([lat / 1e5, lng / 1e5]);
+    }
+    return points;
+  }
+
+  // OpenStreetMap's own tiles, the one basemap that needs no key. They are
+  // drawn in full colour, and their orange main roads would fight the traces,
+  // so the stylesheet drains the colour out of the tile pane (and inverts it
+  // in the dark theme) — see .map .leaflet-tile-pane in styles.css.
+  const MAP_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+  const map = {
+    leaflet: null,        // the L.Map, once the view has been opened
+    layer: null,          // every drawn trace
+    renderer: null,
+    bounds: null,         // of everything drawn, for "Show all"
+    home: null,           // of where most of it is, for the first frame
+    framed: false,        // has the map been put somewhere worth remembering
+  };
+
+  function ensureMap() {
+    if (map.leaflet) return;
+    map.leaflet = L.map('map', { worldCopyJump: true, zoomSnap: 0.5 });
+    // One canvas for every trace: a thousand SVG paths would make panning on a
+    // phone stutter. A generous tolerance makes a 2px line tappable.
+    map.renderer = L.canvas({ tolerance: 8 });
+    map.layer = L.layerGroup().addTo(map.leaflet);
+    L.tileLayer(MAP_TILES, {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map.leaflet);
+    // Leaflet refuses vector layers until the map has a view, so there is
+    // always one — the saved spot, or a placeholder that renderMap replaces
+    // with a frame around every trace the first time it draws.
+    const saved = state.map.viewport;
+    map.framed = !!saved;
+    if (saved) map.leaflet.setView([saved.lat, saved.lng], saved.zoom);
+    else map.leaflet.setView([46.5, 2.5], 5);
+    map.leaflet.on('moveend', () => {
+      if (!map.framed) return;              // the placeholder isn't worth remembering
+      const centre = map.leaflet.getCenter();
+      state.map.viewport = {
+        lat: +centre.lat.toFixed(5), lng: +centre.lng.toFixed(5), zoom: map.leaflet.getZoom(),
+      };
+      saveState();
+    });
+  }
+
+  function trackPopup(track) {
+    const box = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = track.label;
+    box.appendChild(title);
+    const meta = document.createElement('div');
+    meta.className = 'muted';
+    meta.textContent = `${longDate(track.date)} · ${num(track.distance, kmDigits(track.distance))} km`;
+    box.appendChild(meta);
+    const link = document.createElement('a');
+    link.href = `https://www.strava.com/activities/${track.id}`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = 'Open on Strava';
+    box.appendChild(link);
+    return box;
+  }
+
+  function renderMap() {
+    const data = state.map.data;
+    if (!data || !map.leaflet) return;
+    map.layer.clearLayers();
+    // Translucent on purpose: canvas strokes stack, so a street you have been
+    // down twenty times comes out solid and one you took once stays faint.
+    const style = {
+      renderer: map.renderer, color: cssVar('--track'), weight: 2.5, opacity: 0.55,
+    };
+    let bounds = null;
+    let km = 0;
+    const drawn = [];
+    for (const track of data.tracks) {
+      if (!state.map.sports.has(track.group)) continue;
+      if (!track.points) track.points = decodePolyline(track.line);
+      if (track.points.length < 2) continue;
+      const line = L.polyline(track.points, style);
+      line.bindPopup(() => trackPopup(track));
+      map.layer.addLayer(line);
+      const b = line.getBounds();
+      bounds = bounds ? bounds.extend(b) : L.latLngBounds(b.getSouthWest(), b.getNorthEast());
+      drawn.push({ track, bounds: b });
+      km += track.distance;
+    }
+    const shown = drawn.length;
+    map.bounds = bounds;
+    map.home = homeBounds(drawn);
+    $('map-fit').disabled = !bounds;
+    $('map-sub').textContent = shown
+      ? `${num(shown)} trace${shown === 1 ? '' : 's'}, ${num(km, 0)} km. `
+        + 'The more often you went somewhere, the bolder the line. Tap one for the session.'
+      : 'No GPS traces for these sports.';
+    // First visit: frame where you usually go — everything would mean a map of
+    // the continent with home a smudge in the middle of it, because of one
+    // holiday. After that the map opens where you left it.
+    if (!map.framed && bounds) {
+      map.framed = true;
+      map.leaflet.fitBounds(map.home || bounds, { padding: [16, 16] });
+    }
+  }
+
+  // The traces that start near the median start point: "home", for whatever
+  // home has meant across the history. A median rather than a mean, so a trip
+  // abroad pulls it nowhere.
+  function homeBounds(drawn) {
+    if (!drawn.length) return null;
+    const median = (values) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)];
+    };
+    const lat = median(drawn.map((d) => d.track.points[0][0]));
+    const lng = median(drawn.map((d) => d.track.points[0][1]));
+    let home = null;
+    for (const d of drawn) {
+      const [startLat, startLng] = d.track.points[0];
+      // About 40 km either way: a day's hike from the door, not a holiday.
+      if (Math.abs(startLat - lat) > 0.36 || Math.abs(startLng - lng) > 0.5) continue;
+      home = home ? home.extend(d.bounds) : L.latLngBounds(d.bounds.getSouthWest(), d.bounds.getNorthEast());
+    }
+    return home;
+  }
+
+  function fitMap() {
+    if (map.leaflet && map.bounds) map.leaflet.fitBounds(map.bounds, { padding: [16, 16] });
+  }
+
+  // The chips list only the sports that have a trace — a chip for swimming
+  // laps in a pool is a control with nothing behind it.
+  function buildMapChips() {
+    const present = new Set(state.map.data.tracks.map((t) => t.group));
+    const groups = ((state.overview && state.overview.groups) || [])
+      .filter((g) => present.has(g.key));
+    const kept = groups.map((g) => g.key).filter((k) => !state.map.excluded.has(k));
+    state.map.sports = new Set(kept.length ? kept : groups.map((g) => g.key));
+    const container = $('map-sports');
+    buildSportChips(container, groups, state.map.sports, renderMap, state.map.excluded);
+    // Every trace is drawn in the one colour, so the chips wear it too rather
+    // than promising a per-sport colour the map doesn't use.
+    const colour = cssVar('--track');
+    for (const chip of container.children) chip.style.setProperty('--chip-color', colour);
+  }
+
+  let mapSeq = 0;
+
+  async function refreshMap() {
+    const seq = ++mapSeq;
+    try {
+      const [data] = await Promise.all([getJSON('/api/tracks'), loadLeaflet()]);
+      if (seq !== mapSeq) return;
+      state.map.data = data;
+      state.map.loaded = true;
+      // Built after the map is visible: Leaflet measures its container once,
+      // and a hidden one measures zero.
+      ensureMap();
+      map.leaflet.invalidateSize();
+      buildMapChips();
+      renderMap();
+    } catch (error) {
+      console.error(error);
+      if (seq === mapSeq) $('map-sub').textContent = `Map unavailable — ${error.message}.`;
+    }
+  }
+
+  function buildMapControls() {
+    const fit = $('map-fit');
+    if (!fit) return;                       // stale shell; the map tab won't work, the rest will
+    fit.addEventListener('click', fitMap);
+  }
+
   /* --- views ------------------------------------------------------------- */
 
   // Rising bars for the charts view, a calendar for this week, a bulleted list
@@ -2113,6 +2451,22 @@
   // header, and races is a trophy rather than a medal because a medal's ribbon
   // turns to mush at 16px.
   const VIEW_ICONS = {
+    // A folded paper map: three panels, the middle one set back.
+    map: [
+      ['path', {
+        d: 'M1.9 4.1 5.9 2.6l4.2 1.6 4-1.5v9.2l-4 1.5-4.2-1.6-4 1.5Z',
+        fill: 'none',
+        stroke: 'currentColor',
+        'stroke-width': 1.4,
+        'stroke-linejoin': 'round',
+      }],
+      ['path', {
+        d: 'M5.9 2.6v9.2M10.1 4.2v9.2',
+        fill: 'none',
+        stroke: 'currentColor',
+        'stroke-width': 1.4,
+      }],
+    ],
     training: [
       ['rect', { x: 2.25, y: 8.5, width: 3, height: 5.25, rx: 1, fill: 'currentColor' }],
       ['rect', { x: 6.5, y: 5.5, width: 3, height: 8.25, rx: 1, fill: 'currentColor' }],
@@ -2189,9 +2543,10 @@
   // longer views you scroll on to.
   const VIEWS = [
     { key: 'goals', label: 'Goals', icon: VIEW_ICONS.goals, optional: true },
-    { key: 'week', label: 'This week', icon: VIEW_ICONS.week },
+    { key: 'week', label: 'This week', short: 'Week', icon: VIEW_ICONS.week },
     { key: 'training', label: 'Training', icon: VIEW_ICONS.training },
     { key: 'workouts', label: 'Workouts', icon: VIEW_ICONS.workouts },
+    { key: 'map', label: 'Map', icon: VIEW_ICONS.map },
     { key: 'races', label: 'Races', icon: VIEW_ICONS.races, optional: true },
   ];
 
@@ -2224,7 +2579,11 @@
       $(`view-${view.key}`).hidden = state.view !== view.key;
     }
     // Charts drawn inside a hidden container have no width; redraw on reveal.
-    requestAnimationFrame(() => Charts.redrawAll());
+    // The map is the same story: Leaflet sized itself while it was hidden.
+    requestAnimationFrame(() => {
+      Charts.redrawAll();
+      if (state.view === 'map' && map.leaflet) map.leaflet.invalidateSize();
+    });
   }
 
   function buildViewSwitcher() {
@@ -2242,6 +2601,7 @@
       // Each of these is only fetched when it is first looked at.
       if (key === 'workouts' && !state.log.loaded) refreshLog();
       if (key === 'week' && !state.week.loaded) refreshWeek();
+      if (key === 'map' && !state.map.loaded) refreshMap();
     });
   }
 
@@ -2388,6 +2748,10 @@
     renderDuplicates(overview.duplicates || []);
     setSyncState(relativeTime(overview.last_sync));
 
+    // How far back the year stepper may go is a fact about the data, and this
+    // is the moment we learn it.
+    renderYearNav();
+
     // Anything the database now has, minus what you've unticked. Unticking
     // everything is not a state worth landing in, so that falls back to whole.
     const available = overview.groups.map((g) => g.key);
@@ -2423,6 +2787,11 @@
       if (state.log.loaded) refreshLog();
       if (state.goals) renderGoals(state.goals);
       if (state.races && state.races.available) renderRaces(state.races);
+      // The trace colour changes with the theme; the basemap follows by CSS.
+      if (map.leaflet && state.map.data) {
+        buildMapChips();
+        renderMap();
+      }
     });
   }
 
@@ -2456,6 +2825,7 @@
       await refresh();
       if (state.week.loaded) await refreshWeek();
       if (state.log.loaded) await refreshLog();
+      if (state.map.loaded) await refreshMap();
       if (state.goals) await loadGoals();
     } catch (error) {
       setSyncState(`sync failed: ${error.message}`);
@@ -2473,6 +2843,7 @@
     buildWeekControls();
     buildLogControls();
     buildCalendarControls();
+    buildMapControls();
     buildViewSwitcher();
     applyView();
     $('sync-btn').addEventListener('click', syncNow);
@@ -2498,6 +2869,7 @@
           // Only the view you're looking at pays for its data on open.
           if (state.view === 'week') await refreshWeek();
           if (state.view === 'workouts') await refreshLog();
+          if (state.view === 'map') await refreshMap();
         }
       } catch (error) {
         setSyncState(`offline — ${error.message}`);

@@ -19,7 +19,7 @@
               empty card. That cache outlives VERSION on purpose.
 */
 
-const VERSION = 'v31';
+const VERSION = 'v40';
 
 // Long enough for a sleeping Mac to wake and answer, short enough that opening
 // the app on a plane doesn't feel broken.
@@ -37,6 +37,10 @@ const SHELL = [
   '/styles.css',
   '/charts.js',
   '/app.js',
+  // Loaded on demand by the map view, but precached so the map's own chrome
+  // still opens offline. The basemap tiles come from CARTO and need a network.
+  '/vendor/leaflet/leaflet.js',
+  '/vendor/leaflet/leaflet.css',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

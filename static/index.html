@@ -129,6 +129,28 @@
       <legend>Period</legend>
       <div class="segmented" id="f-period" role="group"></div>
     </fieldset>
+    <!-- Only on screen while Period is Year: which year, stepped the same way
+         the week and the calendar are stepped. -->
+    <fieldset class="filter" id="f-year-filter" hidden>
+      <legend>Year</legend>
+      <div class="week-nav">
+        <button type="button" id="year-prev" class="btn btn-icon"
+                aria-label="Previous year" title="Previous year">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M10 3 5.5 8 10 13" fill="none" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <span class="week-nav-label week-nav-label-short" id="year-label" aria-live="polite"></span>
+        <button type="button" id="year-next" class="btn btn-icon"
+                aria-label="Next year" title="Next year">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M6 3 10.5 8 6 13" fill="none" stroke="currentColor"
+                  stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </fieldset>
     <fieldset class="filter">
       <legend>Grouped by</legend>
       <div class="segmented" id="f-bucket" role="group"></div>
@@ -326,10 +348,6 @@
                autocapitalize="none" autocorrect="off" spellcheck="false">
       </div>
     </fieldset>
-    <fieldset class="filter">
-      <legend>Period</legend>
-      <div class="segmented" id="log-period" role="group"></div>
-    </fieldset>
     <fieldset class="filter filter-grow">
       <legend>Sports</legend>
       <div class="chips" id="log-sports" role="group"></div>
@@ -385,6 +403,32 @@
   </section>
 
 </div><!-- /view-workouts -->
+
+<div class="view" id="view-map" hidden>
+
+  <!-- Sports only: the map is "everywhere you've been", so it is always all
+       time. One colour for every trace — the chips choose what is drawn, not
+       how it is coloured. -->
+  <form class="filters" id="map-filters" aria-label="Map filters" autocomplete="off"
+        onsubmit="return false">
+    <fieldset class="filter filter-grow">
+      <legend>Sports</legend>
+      <div class="chips" id="map-sports" role="group"></div>
+    </fieldset>
+  </form>
+
+  <section class="card">
+    <div class="map-head">
+      <div class="card-head">
+        <h2>Everywhere you've been</h2>
+        <p class="card-sub" id="map-sub">Loading traces…</p>
+      </div>
+      <button type="button" id="map-fit" class="btn">Show all</button>
+    </div>
+    <div class="map" id="map" role="region" aria-label="Map of every GPS trace"></div>
+  </section>
+
+</div><!-- /view-map -->
 
   <footer class="foot">
     <span id="foot-range"></span>

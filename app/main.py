@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -24,6 +25,8 @@ app = FastAPI(
     redoc_url=None,
     lifespan=lifespan,
 )
+# /api/tracks is half a megabyte of polyline text, which compresses well.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 def _split(value: str | None) -> list[str] | None:
@@ -132,6 +135,13 @@ def api_activities(
     return stats.activities(
         q, _split(sports), start, end, sort, direction, limit, offset
     )
+
+
+@app.get("/api/tracks")
+def api_tracks(response: Response, sports: str | None = None):
+    """Every GPS trace on file, still polyline-encoded, for the map view."""
+    response.headers["Cache-Control"] = "no-store"
+    return stats.tracks(_split(sports))
 
 
 @app.get("/api/races")
