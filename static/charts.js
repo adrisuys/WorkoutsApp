@@ -369,7 +369,9 @@
       washes.appendChild(svg('rect', {
         x: m.left + i * band, y: m.top, width: band, height: plotH, fill: t.wash,
       }));
-      const rows = spec.series
+      // A caller can tell the whole story for a bucket itself — the By sport
+      // panels list every figure, not just the one the bars measure.
+      const rows = spec.tooltipRows ? spec.tooltipRows(i) : spec.series
         .map((s) => {
           const value = s.values[i] || 0;
           if (value > 0) {
@@ -388,7 +390,7 @@
         })
         .filter(Boolean)
         .reverse();
-      if (spec.series.length > 1) {
+      if (!spec.tooltipRows && spec.series.length > 1) {
         rows.push({ label: 'Total', value: spec.formatValue(stackTotals[i]), total: true });
       }
       if (!rows.length) rows.push({ label: 'Nothing logged', value: '—' });

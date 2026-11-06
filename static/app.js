@@ -33,6 +33,32 @@
     document.addEventListener('visibilitychange', publish);
   })();
 
+  /* --- top bar height ---------------------------------------------------- */
+
+  // The top bar is position: fixed (iOS 27 only keeps a fixed bar clear of its
+  // blur band in the installed app), so it no longer reserves its own space.
+  // --topbar-h is its full height; --topbar-rest-h is everything below its
+  // padding-top. The CSS offsets the page by --topbar-pad-top + rest, so the
+  // part iOS controls (safe-area inset) never waits on JS — only the part
+  // that changes when the bar wraps does, and a content-box observer sees that.
+  (function trackTopbarHeight() {
+    const bar = document.querySelector('.topbar');
+    if (!bar) return;
+    const root = document.documentElement.style;
+    const publish = () => {
+      const padTop = parseFloat(getComputedStyle(bar).paddingTop) || 0;
+      root.setProperty('--topbar-h', bar.offsetHeight + 'px');
+      root.setProperty('--topbar-rest-h', (bar.offsetHeight - padTop) + 'px');
+    };
+    publish();
+    if ('ResizeObserver' in window) new ResizeObserver(publish).observe(bar);
+    // Belt and braces: keep --topbar-h current across rotation and resume.
+    for (const type of ['resize', 'orientationchange', 'pageshow', 'load']) {
+      window.addEventListener(type, publish);
+    }
+    document.addEventListener('visibilitychange', publish);
+  })();
+
   /* --- periods ----------------------------------------------------------- */
 
   // Two questions, not six: "how did this year go" and "how has it all gone".
@@ -83,12 +109,11 @@
     return num(value, value % 1 ? 1 : 0);
   }
 
-  // Distance is worth two decimals: a 3.85 km hike and a 3.50 km swim are
-  // different sessions, and one digit hides the difference. Past 100 km the
-  // tens of metres stop carrying any meaning, and the extra characters would
-  // only push a four-figure total out of its tile. Two is also all there is —
-  // the API rounds to two before it sends anything.
-  const kmDigits = (value) => (Math.abs(value) >= 100 ? 0 : 2);
+  // Distance is always shown to two decimals, at any size: a 3.85 km hike and
+  // a 3.50 km swim are different sessions, and a yearly total reads the same
+  // way across sports (289.41 km swim next to 47.81 km ride). Two is also all
+  // there is — the API rounds to two before it sends anything.
+  const kmDigits = () => 2;
 
   function hoursHuman(value) {
     let h = Math.floor(value);
@@ -772,9 +797,58 @@
         formatTick: fmt.tick,
         integerTicks: state.metric === 'count',
         compact: true,
+        tooltipRows: (i) => facetTooltipRows(s, i),
         ariaLabel: `${s.label}: ${data.label} per ${data.bucket}, total ${fmt.value(total)}.`,
       });
     }
+  }
+
+  /* --- by sport: tooltips ----------------------------------------------- */
+
+  // One sport per panel leaves the tooltip room for the whole session story,
+  // not just the figure the bars measure. Speed is here and nowhere else: a
+  // ratio can't be stacked or totalled, and each sport is talked about in its
+  // own unit — rides and hikes in km/h, swims per 100 m, the rest per km, the
+  // same rule as the log's Pace column.
+  const SPEED_UNITS = {
+    kmh: { label: 'Speed', value: (kmh) => `${num(kmh, 1)} km/h` },
+    perKm: { label: 'Pace', value: (kmh) => `${clock(3600 / kmh)} /km` },
+    per100: { label: 'Pace', value: (kmh) => `${clock(360 / kmh)} /100m` },
+  };
+
+  function speedUnit(group) {
+    if (group === 'ride' || group === 'hike') return SPEED_UNITS.kmh;
+    if (group === 'swim') return SPEED_UNITS.per100;
+    return SPEED_UNITS.perKm;
+  }
+
+  const FACET_TIP_FIELDS = [
+    { key: 'distance', label: 'Distance' },
+    { key: 'time', label: 'Time' },
+    { key: 'count', label: 'Sessions' },
+    { key: 'elevation', label: 'Climb' },
+  ];
+
+  function facetTooltipRows(s, i) {
+    const d = s.details;
+    if (!d || !d.count[i]) return [{ label: 'Nothing logged', value: '—' }];
+    const rows = [];
+    for (const field of FACET_TIP_FIELDS) {
+      const value = d[field.key][i];
+      // A distance or a climb of zero is a sport that has none (strength),
+      // not a figure worth a row. Time and sessions always have one.
+      if (!value && (field.key === 'distance' || field.key === 'elevation')) continue;
+      rows.push({
+        label: field.label,
+        // "Sessions · 3", not "Sessions · 3 sessions".
+        value: field.key === 'count' ? num(value) : METRIC_FMT[field.key].value(value),
+      });
+    }
+    if (d.speed[i] > 0) {
+      const unit = speedUnit(s.key);
+      rows.push({ label: unit.label, value: unit.value(d.speed[i]) });
+    }
+    return rows;
   }
 
   function yearColors(count) {

@@ -18,6 +18,23 @@ METRICS: dict[str, tuple[str, str, str]] = {
     "count":     ("COUNT(*)",                           "",   "Sessions"),
 }
 
+# Speed is a ratio, not an amount: it can't be stacked, summed into a record or
+# run up into a year-on-year total, so it is not a METRIC — it only rides along
+# in a series' per-sport details, for the By sport tooltips. Distance over
+# moving time across the sessions that have both — never an average of
+# averages, so a long ride outweighs a short one — and a gym session with no
+# distance can't drag a bucket's speed down.
+SPEED_AGG = (
+    "SUM(CASE WHEN distance > 0 AND moving_time > 0 THEN distance END) * 3.6 "
+    "/ SUM(CASE WHEN distance > 0 AND moving_time > 0 THEN moving_time END)"
+)
+
+# Every figure for one sport in one bucket, whatever the chart is measuring.
+DETAIL_AGGS: dict[str, str] = {
+    **{key: agg for key, (agg, _, _) in METRICS.items()},
+    "speed": SPEED_AGG,
+}
+
 # Bucket -> SQL expression yielding the bucket's *start date* as YYYY-MM-DD.
 BUCKET_SQL: dict[str, str] = {
     "week":  "date(local_date, 'weekday 0', '-6 days')",   # Monday of that week
@@ -141,8 +158,10 @@ def series(
             raise BadRequest("`end` is before `start`")
 
         clause, params = _group_filter(groups)
+        details_sql = ", ".join(f"{a} AS d_{k}" for k, a in DETAIL_AGGS.items())
         rows = conn.execute(
-            f"SELECT {BUCKET_SQL[bucket]} AS bucket, sport_group, {agg} AS value "
+            f"SELECT {BUCKET_SQL[bucket]} AS bucket, sport_group, {agg} AS value, "
+            f"{details_sql} "
             f"FROM activities "
             f"WHERE local_date >= ? AND local_date <= ?{clause} "
             f"GROUP BY bucket, sport_group",
@@ -153,11 +172,14 @@ def series(
     index = {b: i for i, b in enumerate(buckets)}
     present = [g for g in GROUP_ORDER if any(r["sport_group"] == g for r in rows)]
     data = {g: [0.0] * len(buckets) for g in present}
+    details = {g: {k: [0.0] * len(buckets) for k in DETAIL_AGGS} for g in present}
 
     for r in rows:
         pos = index.get(r["bucket"])
         if pos is not None:  # a bucket can fall outside the range at the edges
             data[r["sport_group"]][pos] = round(r["value"] or 0.0, 2)
+            for k in DETAIL_AGGS:
+                details[r["sport_group"]][k][pos] = round(r[f"d_{k}"] or 0.0, 2)
 
     return {
         "metric": metric,
@@ -168,7 +190,14 @@ def series(
         "end": end_d.isoformat(),
         "buckets": buckets,
         "series": [
-            {"key": g, "label": GROUP_LABELS[g], "values": data[g]} for g in present
+            {
+                "key": g,
+                "label": GROUP_LABELS[g],
+                "values": data[g],
+                # The same buckets in every unit, speed included (km/h).
+                "details": details[g],
+            }
+            for g in present
         ],
     }
 

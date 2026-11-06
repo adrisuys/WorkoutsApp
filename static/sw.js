@@ -19,7 +19,7 @@
               empty card. That cache outlives VERSION on purpose.
 */
 
-const VERSION = 'v40';
+const VERSION = 'v47';
 
 // Long enough for a sleeping Mac to wake and answer, short enough that opening
 // the app on a plane doesn't feel broken.
